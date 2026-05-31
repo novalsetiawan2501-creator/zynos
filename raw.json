@@ -1,0 +1,6 @@
+{
+    "bot_token": "8554415800:AAGoWKrY6ytz9YULirSGtVBEVl26pIZEido",
+    "chat_id": "6912454493",
+    "polling_interval": 2000,
+    "telegram_api_url": "https://api.telegram.org/bot"
+}
