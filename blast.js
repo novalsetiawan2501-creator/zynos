@@ -676,7 +676,7 @@ const RESTART_DELAY = 1000;
  headers["pragma"] = "no-cache";
  headers["priority"] = "u=0, 1";
  headers["sec-ch-ua"] = uaas;
- headers[":path"] = (parsedTarget.path || "/") + "?" + randstr(3) + "=" + generateRandomString(10, 15) + "&" + randstr(4) + "=" + randstrs(8),;
+ headers[":path"] = (parsedTarget.path || "/") + "?" + randstr(3) + "=" + generateRandomString(10, 15) + "&" + randstr(4) + "=" + randstrs(8);
  headers["user-agent"] = uap1;
  headers["accept-encoding"] = encoding;
  headers["cdn-loop"] = "cloudflare";
