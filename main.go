@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"math/rand"
 	"net"
