@@ -1,0 +1,26 @@
+[package]
+name = "loadtest"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "loadtest"
+path = "src/main.rs"
+
+[dependencies]
+# Runtime async multithreaded
+tokio = { version = "1", features = ["full"] }
+# HTTP client dengan dukungan HTTP/2 + connection pooling bawaan
+hyper = { version = "0.14", features = ["client", "http1", "http2", "tcp", "stream"] }
+# TLS (ALPN) agar HTTP/2 bisa dinegosiasikan ke server
+hyper-rustls = { version = "0.24", features = ["http2"] }
+# Parsing argumen CLI
+clap = { version = "4", features = ["derive"] }
+# Progress bar & statistik berjalan
+indicatif = "0.17"
+# CancellationToken untuk graceful shutdown
+tokio-util = "0.7"
+
+[profile.release]
+opt-level = 3
+lto = true
