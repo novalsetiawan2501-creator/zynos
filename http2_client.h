@@ -2,133 +2,120 @@
 #define HTTP2_CLIENT_H
 
 #include <stdint.h>
-#include <stdatomic.h>
-#include <pthread.h>
 #include <time.h>
 #include <openssl/ssl.h>
 #include <nghttp2/nghttp2.h>
 
-#define MAX_HOST_LEN     256
-#define MAX_PATH_LEN     1024
-#define MAX_CONNECTIONS_PER_WORKER 8
-#define IO_BUF_SIZE      65536
+#define H2C_MAX_STREAMS_PER_CONN 256   /* pre-allocated stream-slot pool size */
+#define H2C_OUTBUF_SIZE          (64 * 1024)
+#define H2C_INBUF_SIZE           (64 * 1024)
+#define H2C_MAX_RETRIES          3
+#define H2C_RETRY_DELAY_MS       100
 
-/* ---------------------------------------------------------------- */
-/* Global configuration parsed from CLI arguments                    */
-/* ---------------------------------------------------------------- */
-typedef struct {
-    char     host[MAX_HOST_LEN];
-    char     path[MAX_PATH_LEN];
-    int      port;
-    int      use_tls;          /* derived from scheme (https -> 1)   */
+struct h2_connection;
 
-    int      concurrency;      /* -c  streams per connection          */
-    int      workers;          /* -w  worker threads                  */
-    int      duration_sec;     /* -d  test duration                   */
-    double   rate;             /* -r  target requests/sec (0 = off)   */
-    int      debug;            /* --debug verbose logging              */
-    char     output_csv[512];  /* -o  output file                      */
-} h2c_config_t;
-
-/* ---------------------------------------------------------------- */
-/* Per-request measurement record                                    */
-/* ---------------------------------------------------------------- */
-typedef struct {
-    struct timespec t_start;
-    struct timespec t_first_byte;
-    struct timespec t_end;
-    int32_t  stream_id;
+/* Per-stream bookkeeping. Pre-allocated in a fixed-size array per
+ * connection (H2C_MAX_STREAMS_PER_CONN) and recycled via a freelist stack,
+ * so no malloc/free happens on the request hot path. */
+typedef struct h2_stream_data {
+    int32_t  stream_id;      /* -1 when the slot is free */
+    int      in_use;
+    int      retry_count;
     int      status_code;
-    size_t   resp_header_bytes;   /* wire-size estimate (post-HPACK)  */
-    size_t   resp_header_bytes_raw; /* uncompressed header size est.  */
-    size_t   resp_body_bytes;
-    int      error;                /* 0 = ok, non-zero = error code    */
-    const char *error_str;
-} h2c_request_stat_t;
+    struct timespec t_start;
+    struct h2_connection *conn;
+    /* the request path this slot is (re)submitting; points into a
+     * caller-owned static/long-lived buffer (zero-copy, NO_COPY nv flags) */
+    const char *path;
+} h2_stream_data_t;
 
-/* ---------------------------------------------------------------- */
-/* Aggregated statistics, updated atomically across worker threads   */
-/* ---------------------------------------------------------------- */
+/* A pending retry: a stream that failed and must be resubmitted after
+ * H2C_RETRY_DELAY_MS. Stored inline per-connection, no malloc. */
 typedef struct {
-    atomic_long total_requests;
-    atomic_long total_success;
-    atomic_long total_errors;
-    atomic_long total_conn_established;
-    atomic_long total_conn_reused_streams;
-    atomic_long total_header_bytes_wire;
-    atomic_long total_header_bytes_raw;
-    atomic_long total_body_bytes;
+    int in_use;
+    int retry_count;
+    const char *path;
+    struct timespec due;
+} h2_pending_retry_t;
 
-    pthread_mutex_t latency_mutex;
-    double  *latencies_ms;     /* dynamic array, protected by mutex   */
-    size_t   latencies_len;
-    size_t   latencies_cap;
-
-    pthread_mutex_t csv_mutex;
-    FILE    *csv_fp;
-} h2c_stats_t;
-
-/* ---------------------------------------------------------------- */
-/* One physical TCP+TLS+nghttp2 connection                           */
-/* ---------------------------------------------------------------- */
-typedef struct h2c_connection {
-    int              fd;
-    int              epfd;          /* epoll fd owned by the worker   */
-    SSL_CTX         *ssl_ctx;
-    SSL             *ssl;
+typedef struct h2_connection {
+    int fd;
+    SSL *ssl;
     nghttp2_session *session;
-    int              want_read;
-    int              want_write;
-    int              alive;
-    long             streams_opened;   /* lifetime stream count        */
-    long             in_flight;
-    h2c_config_t    *cfg;
-    h2c_stats_t     *stats;
-    int              worker_id;
-    int              debug;
 
-    /* pending request stat slots, indexed by stream_id % capacity    */
-    h2c_request_stat_t *pending;
-    size_t               pending_cap;
-} h2c_connection_t;
+    char host[256];
+    int  port;
 
-/* Connection pool: an array of connections owned by one worker      */
-typedef struct {
-    h2c_connection_t *conns;
-    int               count;
-} h2c_pool_t;
+    int connected;      /* TCP + TLS + HTTP/2 handshake complete */
+    int want_close;      /* set when connection should be torn down */
 
-typedef struct {
-    int              worker_id;
-    h2c_config_t    *cfg;
-    h2c_stats_t     *stats;
-    volatile int    *stop_flag;
-} h2c_worker_arg_t;
+    /* outbound spill buffer: holds bytes returned by
+     * nghttp2_session_mem_send() that could not be fully written to the
+     * socket in one go (EWOULDBLOCK). Avoids re-invoking mem_send() before
+     * the previous chunk is fully flushed, per nghttp2 API contract. */
+    uint8_t outbuf[H2C_OUTBUF_SIZE];
+    size_t  outbuf_len;
+    size_t  outbuf_sent;
 
-/* --- connection_pool.c ------------------------------------------- */
-int  h2c_pool_init(h2c_pool_t *pool, int worker_id, h2c_config_t *cfg,
-                    h2c_stats_t *stats);
-void h2c_pool_destroy(h2c_pool_t *pool);
-h2c_connection_t *h2c_pool_next_available(h2c_pool_t *pool);
+    h2_stream_data_t streams[H2C_MAX_STREAMS_PER_CONN];
+    int free_stack[H2C_MAX_STREAMS_PER_CONN];
+    int free_top; /* index of next free slot in free_stack, -1 if full */
 
-/* --- http2_client.c ----------------------------------------------- */
-int  h2c_connection_open(h2c_connection_t *conn, h2c_config_t *cfg,
-                          h2c_stats_t *stats, int worker_id, int epfd);
-void h2c_connection_close(h2c_connection_t *conn);
-int  h2c_submit_request(h2c_connection_t *conn);
-int  h2c_connection_service(h2c_connection_t *conn, uint32_t events);
-int  h2c_connection_flush(h2c_connection_t *conn);
+    h2_pending_retry_t retries[H2C_MAX_STREAMS_PER_CONN];
 
-/* --- worker.c ------------------------------------------------------ */
-void *h2c_worker_main(void *arg);
+    uint32_t remote_max_concurrent_streams; /* learned from server SETTINGS */
+    uint32_t inflight_streams;
 
-/* --- stats helpers (main.c) ---------------------------------------- */
-void h2c_stats_init(h2c_stats_t *stats, const char *csv_path);
-void h2c_stats_destroy(h2c_stats_t *stats);
-void h2c_stats_record_latency(h2c_stats_t *stats, double ms);
-void h2c_stats_write_row(h2c_stats_t *stats, int worker_id,
-                          h2c_request_stat_t *rs);
+    void *user_data; /* back-pointer to owning worker context */
+} h2_connection_t;
 
-double h2c_timespec_diff_ms(struct timespec *a, struct timespec *b);
+/* Creates an SSL_CTX configured for TLS 1.3 only, with the requested
+ * ciphersuite list and ALPN set to "h2". Call once per process (or once per
+ * thread if you prefer thread-local contexts); SSL_CTX is thread-safe for
+ * creating new SSL* objects concurrently. */
+SSL_CTX *h2c_create_ssl_ctx(void);
+
+/* Resolves + connects a non-blocking TCP socket, performs the TLS 1.3
+ * handshake (blocking-style helper loop bounded by connect_timeout_ms) and
+ * the HTTP/2 client preface + initial SETTINGS. On success `conn` is fully
+ * usable (connected == 1). Returns 0 on success, -1 on failure. */
+int h2c_connection_open(h2_connection_t *conn, SSL_CTX *ssl_ctx,
+                         const char *host, int port, int connect_timeout_ms);
+
+void h2c_connection_close(h2_connection_t *conn);
+
+/* Submits a GET request for `path` on `conn`. `path` must remain valid for
+ * the lifetime of the request (pass a static string or one owned by the
+ * caller for the connection's lifetime -- enables NO_COPY zero-copy nv).
+ * Returns 0 on success, -1 if no free stream slot / session error. */
+int h2c_submit_get(h2_connection_t *conn, const char *path);
+
+/* Drains any due retries for this connection and resubmits them. Call once
+ * per event-loop iteration. */
+void h2c_process_retries(h2_connection_t *conn);
+
+/* Should be called when epoll reports EPOLLIN readiness. Reads from the
+ * socket via SSL_read and feeds bytes to nghttp2_session_mem_recv(),
+ * triggering the registered callbacks synchronously. Returns 0 on success,
+ * -1 on fatal connection error (caller should close+optionally reconnect). */
+int h2c_on_readable(h2_connection_t *conn);
+
+/* Should be called when epoll reports EPOLLOUT readiness (or whenever new
+ * frames may need flushing after a submit). Drains nghttp2's internal send
+ * buffer via nghttp2_session_mem_send() directly into SSL_write() -- no
+ * intermediate copy on the fast path; only spills to outbuf on partial
+ * writes. Returns 0 on success, -1 on fatal connection error. */
+int h2c_on_writable(h2_connection_t *conn);
+
+/* Returns 1 if nghttp2 wants to read/write, i.e. what epoll events to
+ * register for this connection's fd right now. */
+int h2c_want_read(const h2_connection_t *conn);
+int h2c_want_write(const h2_connection_t *conn);
+
+/* Sends `count` sequential dummy GET requests on `conn` and blocks (using a
+ * small local poll loop, bounded by timeout_ms) until all responses close
+ * or the timeout elapses. Used for connection warm-up before the timed
+ * test window starts. Returns number of requests that completed. */
+int h2c_warmup(h2_connection_t *conn, const char *path, int count, int timeout_ms);
 
 #endif /* HTTP2_CLIENT_H */
